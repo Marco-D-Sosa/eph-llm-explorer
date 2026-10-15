@@ -58,14 +58,16 @@ DICCIONARIO DE DATOS EPH. La base SQLite contiene 3 tablas:
 llm_sql = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0)
 llm_graficos = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.2)
 
-
 # 5. Configuración del Agente SQL
 agente_sql = create_sql_agent(
     llm=llm_sql,
     db=db,
-    agent_type="tool-calling",
+    agent_type="zero-shot-react-description",
     verbose=True,
-    agent_executor_kwargs={"return_intermediate_steps": True},
+    agent_executor_kwargs={
+        "return_intermediate_steps": True, 
+        "handle_parsing_errors": True # Agregado para mayor estabilidad
+    },
     prefix=f"Eres un experto en econometría analizando la EPH. Escribe código SQL basado estrictamente en este diccionario: {diccionario_eph}"
 )
 
