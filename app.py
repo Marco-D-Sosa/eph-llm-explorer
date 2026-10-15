@@ -4,6 +4,7 @@ import sqlite3
 import plotly.express as px
 import os
 import requests
+import concurrent.futures
 from langchain_community.utilities import SQLDatabase
 from langchain_community.agent_toolkits import create_sql_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -71,28 +72,27 @@ agente_sql = create_sql_agent(
     prefix=f"Eres un experto en econometría analizando la EPH. Escribe código SQL basado estrictamente en este diccionario: {diccionario_eph}"
 )
 
-# 6. Interfaz de Usuario
+# 6. Interfaz de Usuario y Lógica de Análisis
 st.title("📊 EPH AI Explorer")
 st.markdown("Consulta y grafica los microdatos de la Encuesta Permanente de Hogares usando lenguaje natural.")
 
-pregunta = st.text_input("¿Qué quieres analizar?", placeholder="Ej: ¿Cuál es el ingreso promedio por sexo entre los ocupados?")
+pregunta = st.text_input("¿Qué quieres analizar?", placeholder="Ej: ¿Cuál es el ingreso promedio (ITF) por sexo (CH04) entre los ocupados?")
 
 if st.button("Ejecutar Análisis") and pregunta:
     with st.spinner("Generando consulta SQL y procesando datos..."):
         try:
-            # Paso 1: Una sola llamada directa al LLM para obtener estrictamente el SQL
             prompt_sql = f"""
             Eres un experto en SQL y econometría analizando la EPH. 
             El esquema de la base de datos es el siguiente:
             {diccionario_eph}
 
             Escribe ÚNICAMENTE una consulta SQL válida y limpia en SQLite que responda a la siguiente pregunta.
-            No incluyas bloques de código markdown (como ```sql), explicaciones, ni texto adicional. Devuelve solo la sentencia SQL pura.
+            No incluyas bloques de código markdown, explicaciones, ni texto adicional. Devuelve solo la sentencia SQL pura.
 
             Pregunta del usuario: {pregunta}
             """
             
-            # Forzamos un límite estricto de 30 segundos para la respuesta del modelo
+            # Llamada segura con timeout de 30 segundos para evitar bloqueos por alta demanda
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(llm_sql.invoke, prompt_sql)
                 try:
@@ -101,7 +101,7 @@ if st.button("Ejecutar Análisis") and pregunta:
                     st.error("La API de Google tardó demasiado en responder y la conexión expiró (Timeout). Intenta de nuevo.")
                     st.stop()
 
-            # Manejo seguro por si el contenido viene como texto o como lista de bloques
+            # Extracción robusta (maneja tanto texto plano como listas de bloques)
             content = respuesta_llm.content
             if isinstance(content, list):
                 texto_generado = "".join([item.get("text", str(item)) if isinstance(item, dict) else str(item) for item in content])
@@ -109,7 +109,7 @@ if st.button("Ejecutar Análisis") and pregunta:
                 texto_generado = str(content)
 
             query_generada = texto_generado.replace("```sql", "").replace("```", "").strip()
-
+            
             with st.expander("Ver código SQL generado"):
                 st.code(query_generada, language="sql")
 
@@ -119,8 +119,50 @@ if st.button("Ejecutar Análisis") and pregunta:
             conn.close()
 
             if not df_resultado.empty:
+                # Paso opcional: Generar conclusión textual basada en los resultados
+                prompt_conclusion = f"""
+                A partir de la pregunta del usuario: "{pregunta}"
+                Y los siguientes resultados obtenidos de la base de datos (mostrados como dataframe en formato dict): {df_resultado.head(15).to_dict()}
+                Redacta una conclusión analítica clara y directa en español.
+                """
+                
+                try:
+                    res_conclusion = llm_sql.invoke(prompt_conclusion)
+                    c_content = res_conclusion.content
+                    conclusion = "".join([i.get("text", str(i)) if isinstance(i, dict) else str(i) for i in c_content]) if isinstance(c_content, list) else str(c_content)
+                    
+                    st.write("### Conclusión")
+                    st.write(conclusion)
+                except Exception:
+                    pass # Si falla la conclusión secundaria, no interrumpe la visualización de datos
+
                 st.write("### Datos Obtenidos")
                 st.dataframe(df_resultado.head(10))
+
+                # Visualización con Plotly si hay múltiples columnas
+                if len(df_resultado.columns) > 1:
+                    prompt_grafico = f"""
+                    Dada esta muestra de datos: {df_resultado.head().to_dict()}
+                    Escribe SOLO código Python usando Plotly Express (importado como px) para crear el gráfico adecuado.
+                    La figura DEBE asignarse a una variable llamada 'fig'.
+                    El DataFrame está en memoria como 'df_resultado'. NO uses 'fig.show()'.
+                    Devuelve únicamente el código Python crudo sin markdown ni explicaciones.
+                    """
+                    
+                    st.write("### Gráfico")
+                    with st.spinner("Renderizando visualización..."):
+                        res_grafico = llm_graficos.invoke(prompt_grafico)
+                        g_content = res_grafico.content
+                        codigo_grafico_raw = "".join([i.get("text", str(i)) if isinstance(i, dict) else str(i) for i in g_content]) if isinstance(g_content, list) else str(g_content)
+                        codigo_grafico = codigo_grafico_raw.replace("```python", "").replace("```", "").strip()
+                        
+                        local_vars = {"pd": pd, "px": px, "df_resultado": df_resultado}
+                        try:
+                            exec(codigo_grafico, globals(), local_vars)
+                            if "fig" in local_vars:
+                                st.plotly_chart(local_vars["fig"], use_container_width=True)
+                        except Exception as e_exec:
+                            st.warning(f"No se pudo renderizar el gráfico. Error: {e_exec}")
             else:
                 st.warning("La consulta no arrojó resultados en la base de datos.")
 
