@@ -4,10 +4,8 @@ import sqlite3
 import plotly.express as px
 import os
 import requests
-import concurrent.futures
-from langchain_community.utilities import SQLDatabase
-from langchain_community.agent_toolkits import create_sql_agent
-from langchain_google_genai import ChatGoogleGenerativeAI
+import google.generativeai as genai
+from sqlalchemy import create_engine
 
 # 1. Configuración de página y Secretos
 st.set_page_config(page_title="EPH AI Explorer", layout="wide")
@@ -16,7 +14,11 @@ if "GEMINI_API_KEY" not in st.secrets:
     st.error("Falta configurar GEMINI_API_KEY en los secretos de Streamlit.")
     st.stop()
     
-os.environ["GOOGLE_API_KEY"] = st.secrets["GEMINI_API_KEY"]
+# Configuración nativa de Google GenAI
+genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+
+# Usamos el cliente nativo con el modelo más ágil
+modelo_nativo = genai.GenerativeModel("gemini-flash-latest")
 
 # 2. Configuración de descarga y caché de la base de datos
 URL_DB = "https://github.com/Marco-D-Sosa/eph-llm-explorer/releases/download/v1.0/eph.db"
@@ -25,21 +27,19 @@ PATH_DB = "eph.db"
 @st.cache_resource(show_spinner="Descargando microdatos de la EPH (200MB)... Esto solo tomará unos segundos la primera vez.")
 def inicializar_base_datos():
     if not os.path.exists(PATH_DB):
-        respuesta = requests.get(URL_DB, stream=True)
-        respuesta.raise_for_status() 
-        
-        with open(PATH_DB, "wb") as archivo:
-            for chunk in respuesta.iter_content(chunk_size=8192):
-                archivo.write(chunk)
-                
-    # Retorna la conexión en modo seguro de solo lectura
-    return SQLDatabase.from_uri(f"sqlite:///file:{PATH_DB}?mode=ro&uri=true")
+        try:
+            respuesta = requests.get(URL_DB, stream=True, timeout=60)
+            respuesta.raise_for_status() 
+            with open(PATH_DB, "wb") as archivo:
+                for chunk in respuesta.iter_content(chunk_size=16384):
+                    if chunk:
+                        archivo.write(chunk)
+        except Exception as e:
+            st.error(f"Error al descargar la base de datos: {e}")
+            raise e
+    return PATH_DB
 
-try:
-    db = inicializar_base_datos()
-except Exception as e:
-    st.error(f"Error al descargar o conectar la base de datos: {e}")
-    st.stop()
+db_path = inicializar_base_datos()
 
 # 3. Diccionario de Datos (Capa Semántica)
 diccionario_eph = """
@@ -55,31 +55,14 @@ DICCIONARIO DE DATOS EPH. La base SQLite contiene 3 tablas:
 3. 'cargados': Tabla de control interno de los trimestres procesados.
 """
 
-# 4. Instanciación de Modelos
-llm_sql = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
-llm_graficos = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.2)
-
-# 5. Configuración del Agente SQL
-agente_sql = create_sql_agent(
-    llm=llm_sql,
-    db=db,
-    agent_type="zero-shot-react-description",
-    verbose=True,
-    agent_executor_kwargs={
-        "return_intermediate_steps": True, 
-        "handle_parsing_errors": True # Agregado para mayor estabilidad
-    },
-    prefix=f"Eres un experto en econometría analizando la EPH. Escribe código SQL basado estrictamente en este diccionario: {diccionario_eph}"
-)
-
-# 6. Interfaz de Usuario y Lógica de Análisis
+# 6. Interfaz de Usuario y Lógica Directa Nativa
 st.title("📊 EPH AI Explorer")
 st.markdown("Consulta y grafica los microdatos de la Encuesta Permanente de Hogares usando lenguaje natural.")
 
 pregunta = st.text_input("¿Qué quieres analizar?", placeholder="Ej: ¿Cuál es el ingreso promedio (ITF) por sexo (CH04) entre los ocupados?")
 
 if st.button("Ejecutar Análisis") and pregunta:
-    with st.spinner("Generando consulta SQL y procesando datos..."):
+    with st.spinner("Generando consulta SQL con motor nativo..."):
         try:
             prompt_sql = f"""
             Eres un experto en SQL y econometría analizando la EPH. 
@@ -92,54 +75,24 @@ if st.button("Ejecutar Análisis") and pregunta:
             Pregunta del usuario: {pregunta}
             """
             
-            # Llamada segura con timeout de 30 segundos para evitar bloqueos por alta demanda
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                future = executor.submit(llm_sql.invoke, prompt_sql)
-                try:
-                    respuesta_llm = future.result(timeout=30)
-                except concurrent.futures.TimeoutError:
-                    st.error("La API de Google tardó demasiado en responder y la conexión expiró (Timeout). Intenta de nuevo.")
-                    st.stop()
-
-            # Extracción robusta (maneja tanto texto plano como listas de bloques)
-            content = respuesta_llm.content
-            if isinstance(content, list):
-                texto_generado = "".join([item.get("text", str(item)) if isinstance(item, dict) else str(item) for item in content])
-            else:
-                texto_generado = str(content)
-
-            query_generada = texto_generado.replace("```sql", "").replace("```", "").strip()
+            # Llamada nativa directa sin hilos ni timeouts complejos de LangChain
+            respuesta_llm = modelo_nativo.generate_content(prompt_sql)
+            
+            query_generada = respuesta_llm.text.replace("```sql", "").replace("```", "").strip()
             
             with st.expander("Ver código SQL generado"):
                 st.code(query_generada, language="sql")
 
             # Ejecución local directa con Pandas
-            conn = sqlite3.connect(f"file:{PATH_DB}?mode=ro", uri=True)
+            conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
             df_resultado = pd.read_sql_query(query_generada, conn)
             conn.close()
 
             if not df_resultado.empty:
-                # Paso opcional: Generar conclusión textual basada en los resultados
-                prompt_conclusion = f"""
-                A partir de la pregunta del usuario: "{pregunta}"
-                Y los siguientes resultados obtenidos de la base de datos (mostrados como dataframe en formato dict): {df_resultado.head(15).to_dict()}
-                Redacta una conclusión analítica clara y directa en español.
-                """
-                
-                try:
-                    res_conclusion = llm_sql.invoke(prompt_conclusion)
-                    c_content = res_conclusion.content
-                    conclusion = "".join([i.get("text", str(i)) if isinstance(i, dict) else str(i) for i in c_content]) if isinstance(c_content, list) else str(c_content)
-                    
-                    st.write("### Conclusión")
-                    st.write(conclusion)
-                except Exception:
-                    pass # Si falla la conclusión secundaria, no interrumpe la visualización de datos
-
                 st.write("### Datos Obtenidos")
                 st.dataframe(df_resultado.head(10))
 
-                # Visualización con Plotly si hay múltiples columnas
+                # Visualización opcional con Plotly si hay columnas cruzadas
                 if len(df_resultado.columns) > 1:
                     prompt_grafico = f"""
                     Dada esta muestra de datos: {df_resultado.head().to_dict()}
@@ -148,17 +101,14 @@ if st.button("Ejecutar Análisis") and pregunta:
                     El DataFrame está en memoria como 'df_resultado'. NO uses 'fig.show()'.
                     Devuelve únicamente el código Python crudo sin markdown ni explicaciones.
                     """
-                    
                     st.write("### Gráfico")
                     with st.spinner("Renderizando visualización..."):
-                        res_grafico = llm_graficos.invoke(prompt_grafico)
-                        g_content = res_grafico.content
-                        codigo_grafico_raw = "".join([i.get("text", str(i)) if isinstance(i, dict) else str(i) for i in g_content]) if isinstance(g_content, list) else str(g_content)
-                        codigo_grafico = codigo_grafico_raw.replace("```python", "").replace("```", "").strip()
+                        res_grafico = modelo_nativo.generate_content(prompt_grafico)
+                        codigo_grafico_raw = res_grafico.text.replace("```python", "").replace("```", "").strip()
                         
                         local_vars = {"pd": pd, "px": px, "df_resultado": df_resultado}
                         try:
-                            exec(codigo_grafico, globals(), local_vars)
+                            exec(codigo_grafico_raw, globals(), local_vars)
                             if "fig" in local_vars:
                                 st.plotly_chart(local_vars["fig"], use_container_width=True)
                         except Exception as e_exec:
