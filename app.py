@@ -43,16 +43,22 @@ db_path = inicializar_base_datos()
 
 # 3. Diccionario de Datos (Capa Semántica)
 diccionario_eph = """
-DICCIONARIO DE DATOS EPH. La base SQLite contiene 3 tablas:
+DICCIONARIO DE DATOS EPH. La base SQLite contiene 3 tablas principales:
 1. 'individuos': Tabla principal con los microdatos poblacionales. Columnas clave:
-   - CODUSU / NRO_HOGAR: Identificadores únicos.
-   - CH04: Sexo (1 = Hombre, 2 = Mujer).
-   - CH06: Edad en años.
-   - ITF: Ingreso Total Familiar.
-   - ESTADO: Condición de actividad (1 = Ocupado, 2 = Desocupado, 3 = Inactivo).
-   - PONDERA: Ponderador poblacional (usar siempre para calcular totales o promedios representativos).
-2. 'canastas': Contiene los umbrales monetarios de las líneas de pobreza (CBA y CBT).
-3. 'cargados': Tabla de control interno de los trimestres procesados.
+   - codusu, nro_hogar, componente: Identificadores únicos.
+   - ano4, trimestre: Año y trimestre de la encuesta.
+   - ch04: Sexo (1 = Hombre, 2 = Mujer).
+   - ch06: Edad en años.
+   - itf: Ingreso Total Familiar.
+   - ipcf: Ingreso Per Cápita Familiar.
+   - pondera, pondih: Ponderadores poblacionales (usar siempre pondera o pondih para calcular totales o promedios representativos).
+   - estado: Condición de actividad (1 = Ocupado, 2 = Desocupado, 3 = Inactivo).
+   - region: Código de región geográfico (1 = GBA, 2 = Pampeana, 3 = Cuyo, 4 = Noroeste, 5 = Patagonia, 6 = Noreste).
+2. 'canastas': Contiene los umbrales monetarios de las líneas oficiales de pobreza. Columnas clave:
+   - ano, trimestre, region: Para cruzar temporal y regionalmente con individuos.
+   - lp_extrema: Línea de indigencia (CBA).
+   - lp_moderada: Línea de pobreza (CBT).
+3. 'cargados': Tabla de control interno de trimestres procesados.
 """
 
 # 6. Interfaz de Usuario y Lógica Directa Nativa
