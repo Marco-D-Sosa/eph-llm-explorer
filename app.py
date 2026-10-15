@@ -59,10 +59,10 @@ DICCIONARIO DE DATOS EPH. La base SQLite contiene 3 tablas:
 st.title("📊 EPH AI Explorer")
 st.markdown("Consulta y grafica los microdatos de la Encuesta Permanente de Hogares usando lenguaje natural.")
 
-pregunta = st.text_input("¿Qué quieres analizar?", placeholder="Ej: ¿Cuál es el ingreso promedio (ITF) por sexo (CH04) entre los ocupados?")
+pregunta = st.text_input("¿Qué quieres analizar?", placeholder="Ej: ¿Cuál es el ingreso promedio por sexo entre los ocupados?")
 
 if st.button("Ejecutar Análisis") and pregunta:
-    with st.spinner("Generando consulta SQL con motor nativo..."):
+    with st.spinner("Generando consulta SQL..."):
         try:
             prompt_sql = f"""
             Eres un experto en SQL y econometría analizando la EPH. 
