@@ -75,49 +75,60 @@ agente_sql = create_sql_agent(
 st.title("📊 EPH AI Explorer")
 st.markdown("Consulta y grafica los microdatos de la Encuesta Permanente de Hogares usando lenguaje natural.")
 
-pregunta = st.text_input("¿Qué quieres analizar?", placeholder="Ej: ¿Cuál es el ingreso promedio (ITF) por sexo (CH04) entre los ocupados?")
+pregunta = st.text_input("¿Qué quieres analizar?", placeholder="Ej: ¿Cuál es el ingreso promedio por sexo entre los ocupados?")
 
 if st.button("Ejecutar Análisis") and pregunta:
-    with st.spinner("Construyendo consulta SQL y analizando la base de datos..."):
+    with st.spinner("Generando consulta SQL y procesando datos..."):
         try:
-            # Paso A: Generar SQL y extraer conclusión textual
-            respuesta = agente_sql.invoke({"input": pregunta})
+            # Paso 1: Una sola llamada directa al LLM para obtener estrictamente el SQL
+            prompt_sql = f"""
+            Eres un experto en SQL y econometría analizando la EPH. 
+            El esquema de la base de datos es el siguiente:
+            {diccionario_eph}
+
+            Escribe ÚNICAMENTE una consulta SQL válida y limpia en SQLite que responda a la siguiente pregunta.
+            No incluyas bloques de código markdown (como ```sql), explicaciones, ni texto adicional. Devuelve solo la sentencia SQL pura.
+
+            Pregunta del usuario: {pregunta}
+            """
             
-            st.write("### Conclusión")
-            st.write(respuesta["output"])
-
-            # Paso B: Extraer la query SQL
-            query_generada = None
-            for action, observation in respuesta.get("intermediate_steps", []):
-                if action.tool == "sql_db_query":
-                    query_generada = action.tool_input
-                    break
+            query_generada = llm_sql.invoke(prompt_sql).content.replace("```sql", "").replace("```", "").strip()
             
-            # Paso C: Visualización de datos
-            if query_generada:
-                with st.expander("Ver código SQL generado"):
-                    st.code(query_generada, language="sql")
-                    
-                # Conexión independiente para que Pandas ejecute la query y recupere los datos
-                conn = sqlite3.connect(f"file:{PATH_DB}?mode=ro", uri=True)
-                df_resultado = pd.read_sql_query(query_generada, conn)
-                conn.close()
+            with st.expander("Ver código SQL generado"):
+                st.code(query_generada, language="sql")
 
-                if not df_resultado.empty and len(df_resultado.columns) > 1:
-                    st.write("### Datos Obtenidos")
-                    st.dataframe(df_resultado.head(10))
+            # Paso 2: Ejecución local directa con Pandas (Sin intermediarios lentos)
+            conn = sqlite3.connect(f"file:{PATH_DB}?mode=ro", uri=True)
+            df_resultado = pd.read_sql_query(query_generada, conn)
+            conn.close()
 
-                    # Generador de Plotly Express
+            if not df_resultado.empty:
+                # Paso 3: Generar conclusión textual basada en los resultados obtenidos
+                prompt_conclusion = f"""
+                A partir de la pregunta del usuario: "{pregunta}"
+                Y los siguientes resultados obtenidos de la base de datos (mostrados como dataframe en formato dict): {df_resultado.head(15).to_dict()}
+                Redacta una conclusión analítica clara y directa en español.
+                """
+                conclusion = llm_sql.invoke(prompt_conclusion).content
+                
+                st.write("### Conclusión")
+                st.write(conclusion)
+
+                st.write("### Datos Obtenidos")
+                st.dataframe(df_resultado.head(10))
+
+                # Paso 4: Visualización con Plotly
+                if len(df_resultado.columns) > 1:
                     prompt_grafico = f"""
-                    Dada esta muestra de datos representados como un diccionario: {df_resultado.head().to_dict()}
-                    Escribe SOLO código Python usando Plotly Express (importado como px) para crear el gráfico más adecuado para estos datos.
-                    La figura resultante DEBE asignarse a una variable llamada 'fig'.
-                    El DataFrame ya está en memoria como 'df_resultado'. NO crees datos ficticios ni uses 'fig.show()'.
-                    No incluyas markdown, bloques de código, ni texto adicional. Devuelve únicamente el código Python crudo.
+                    Dada esta muestra de datos: {df_resultado.head().to_dict()}
+                    Escribe SOLO código Python usando Plotly Express (importado como px) para crear el gráfico adecuado.
+                    La figura DEBE asignarse a una variable llamada 'fig'.
+                    El DataFrame está en memoria como 'df_resultado'. NO uses 'fig.show()'.
+                    Devuelve únicamente el código Python crudo sin markdown ni explicaciones.
                     """
                     
                     st.write("### Gráfico")
-                    with st.spinner("Renderizando visualización interactiva..."):
+                    with st.spinner("Renderizando visualización..."):
                         codigo_grafico_raw = llm_graficos.invoke(prompt_grafico).content
                         codigo_grafico = codigo_grafico_raw.replace("```python", "").replace("```", "").strip()
                         
@@ -127,11 +138,9 @@ if st.button("Ejecutar Análisis") and pregunta:
                             if "fig" in local_vars:
                                 st.plotly_chart(local_vars["fig"], use_container_width=True)
                         except Exception as e_exec:
-                            st.warning(f"No se pudo renderizar la visualización de Plotly. Error: {e_exec}")
-                            with st.expander("Ver el intento de código"):
-                                st.code(codigo_grafico, language="python")
-                else:
-                    st.info("La consulta produjo un valor único (escalar) o no devolvió resultados para graficar.")
+                            st.warning(f"No se pudo renderizar el gráfico. Error: {e_exec}")
+            else:
+                st.warning("La consulta no arrojó resultados en la base de datos.")
 
         except Exception as e:
             st.error(f"Error de ejecución: {e}")
