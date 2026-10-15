@@ -92,7 +92,23 @@ if st.button("Ejecutar Análisis") and pregunta:
             Pregunta del usuario: {pregunta}
             """
             
-            query_generada = llm_sql.invoke(prompt_sql).content.replace("```sql", "").replace("```", "").strip()
+            # Forzamos un límite estricto de 30 segundos para la respuesta del modelo
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(llm_sql.invoke, prompt_sql)
+                try:
+                    respuesta_llm = future.result(timeout=30)
+                except concurrent.futures.TimeoutError:
+                    st.error("La API de Google tardó demasiado en responder y la conexión expiró (Timeout). Intenta de nuevo.")
+                    st.stop()
+
+            # Manejo seguro por si el contenido viene como texto o como lista de bloques
+            content = respuesta_llm.content
+            if isinstance(content, list):
+                texto_generado = "".join([item.get("text", str(item)) if isinstance(item, dict) else str(item) for item in content])
+            else:
+                texto_generado = str(content)
+
+            query_generada = texto_generado.replace("```sql", "").replace("```", "").strip()
             
             with st.expander("Ver código SQL generado"):
                 st.code(query_generada, language="sql")
