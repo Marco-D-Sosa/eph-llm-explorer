@@ -55,8 +55,8 @@ DICCIONARIO DE DATOS EPH. La base SQLite contiene 3 tablas:
 """
 
 # 4. Instanciación de Modelos
-llm_sql = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0)
-llm_graficos = ChatGoogleGenerativeAI(model="gemini-3.5-flash", temperature=0.2)
+llm_sql = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0)
+llm_graficos = ChatGoogleGenerativeAI(model="gemini-flash-latest", temperature=0.2)
 
 # 5. Configuración del Agente SQL
 agente_sql = create_sql_agent(
