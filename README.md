@@ -18,8 +18,8 @@ El enfoque central de este desarrollo es el **Análisis de Datos y la Comunicaci
 
 *   **Consultas Dinámicas (Text-to-SQL):** Permite a usuarios sin conocimientos técnicos interrogar una base de datos compleja (millones de registros) escribiendo sus preguntas en español.
 *   **Visualización Automática (Plotly):** Dependiendo de la estructura de la consulta generada, la aplicación interpreta los resultados y renderiza gráficos interactivos para facilitar la comprensión de las tendencias.
-*   **Rigor Metodológico Integrado:** El modelo está condicionado por un diccionario semántico estricto para aplicar correctamente los ponderadores poblacionales (`PONDERA`, `PONDIH`) y las líneas de pobreza oficiales (`lp_moderada`, `lp_extrema`), asegurando que las inferencias estadísticas sean válidas.
-*   **Arquitectura Desacoplada y Escalable:** De base, la aplicación está conectada a los microdatos de la EPH mediante el dataset procesado en mi proyecto previo **[SQL EPH ETL Pipeline](https://github.com/Marco-D-Sosa/SQL-eph-etl-pipeline)**. Gracias a su diseño modular, con un pequeño cambio en el código, el sistema puede modificarse fácilmente para realizar consultas sobre cualquier otra base de datos o conectarse a otros modelos de inteligencia artificial según la necesidad del negocio.
+*   **Rigor Metodológico Integrado:** El modelo está condicionado por un diccionario semántico estricto para aplicar correctamente los ponderadores poblacionales y las líneas de pobreza oficiales, asegurando que las inferencias estadísticas sean válidas.
+*   **Arquitectura Desacoplada y Escalable:** De base, la aplicación está conectada a los microdatos de la EPH mediante el dataset procesado en mi proyecto previo **[SQL EPH ETL Pipeline](https://github.com/Marco-D-Sosa/SQL-eph-etl-pipeline)**. Gracias a su diseño modular, con un pequeño cambio en el código, el sistema puede modificarse fácilmente para realizar consultas sobre cualquier otra base de datos o conectarse a otros modelos de inteligencia artificial.
 
 ## 🛠️ Stack Tecnológico
 
